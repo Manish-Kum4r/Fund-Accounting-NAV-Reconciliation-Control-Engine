@@ -1,7 +1,5 @@
 # 🏦 Fund Accounting — NAV & Reconciliation Control Engine
 
-> **Hindi mein ek line mein:** Ye ek complete end-to-end project hai — SQL, Python, Excel/VBA, Power BI, Power Automate aur Reconciliation — jisme daily NAV calculate hota hai, aur books ko custodian / bank / RTA se automatically mila kar breaks pakde jaate hain, control panel se PASS/FAIL check hota hai, aur alerts Teams/Email pe jaate hain. Ek Power BI style 1-page dashboard PNG bhi included hai.
-
 A production-style **daily control engine** for a mutual fund / PMS back office:
 
 1. **Calculates day-end NAV** per fund (cash + holdings − accrued liabilities ÷ units).
