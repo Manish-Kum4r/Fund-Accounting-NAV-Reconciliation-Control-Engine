@@ -1,0 +1,6 @@
+rule_code,rule_name,actual,threshold,comparison,status,comment
+CHK01,Holdings recon match rate >= 99%,0.823529,0.99,>=,FAIL,Holdings match rate = 82.35%
+CHK02,Cash recon - zero unmatched items,1,0,<=,FAIL,Unmatched cash items = 1
+CHK03,Max |NAV variance| vs RTA <= 0.05%,0.0008,0.0005,<=,FAIL,Max |NAV var| vs RTA = 0.0800%
+CHK04,Open SLA-breaching breaks = 0,1,0,<=,FAIL,Open SLA breaches = 1
+CHK05,100% of open breaks have an owner,1.0,1.0,>=,PASS,Breaks without owner = 0

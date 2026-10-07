@@ -1,0 +1,46 @@
+{
+  "as_on": "2026-10-06",
+  "window_start": "2026-08-26",
+  "funds": {
+    "ALPHA_EQ": {
+      "fund_name": "Alpha Equity Fund",
+      "category": "Equity",
+      "nav": 9.560259,
+      "prev_nav": 9.547956,
+      "day_return_pct": 0.128855,
+      "window_return_pct": -3.8535,
+      "units_close": 10223287.5347,
+      "aum_inr": 97534846.32,
+      "cash_inr": -4015829.86,
+      "holdings_value_inr": 101758370.47
+    },
+    "BETA_DEBT": {
+      "fund_name": "Beta Debt Fund",
+      "category": "Debt",
+      "nav": 9.354638,
+      "prev_nav": 9.372566,
+      "day_return_pct": -0.191289,
+      "window_return_pct": -6.3631,
+      "units_close": 20021632.2561,
+      "aum_inr": 187427576.67,
+      "cash_inr": 7459343.4,
+      "holdings_value_inr": 179818675.94
+    },
+    "GAMMA_BAL": {
+      "fund_name": "Gamma Balanced Fund",
+      "category": "Hybrid",
+      "nav": 9.19379,
+      "prev_nav": 9.185587,
+      "day_return_pct": 0.089308,
+      "window_return_pct": -7.981,
+      "units_close": 15018599.742,
+      "aum_inr": 137609540.54,
+      "cash_inr": 11778222.82,
+      "holdings_value_inr": 126319664.08
+    }
+  },
+  "total_aum_inr": 422571963.53,
+  "wtd_avg_nav": 9.349718,
+  "total_units": 45263519.5328,
+  "wtd_day_return_pct": -0.02602
+}

@@ -1,0 +1,4 @@
+stmt_date,fund_code,bank_balance,bank_name,account_last4
+2026-10-06,ALPHA_EQ,-4028329.86,HDFC Bank - Fund Collection A/c,4471
+2026-10-06,BETA_DEBT,7459343.4,HDFC Bank - Fund Collection A/c,4471
+2026-10-06,GAMMA_BAL,11778222.82,HDFC Bank - Fund Collection A/c,4471

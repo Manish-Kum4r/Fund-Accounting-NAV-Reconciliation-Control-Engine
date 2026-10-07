@@ -1,0 +1,149 @@
+// ============================================================================
+// DAX MEASURES - Fund Accounting NAV & Reconciliation Control Engine
+// Data model (star schema):
+//   Dimensions : Date | Funds | Securities
+//   Facts      : NAV History | Transactions | Holdings EOD | Recon Breaks
+// Paste these into Power BI Desktop: Home -> Enter data -> ... or
+// Modeling -> New measure (one by one), or use Tabular Editor.
+// ============================================================================
+
+// ------------------------------- NAV & AUM --------------------------------
+Total AUM (INR) =
+SUM ( 'NAV History'[net_assets] )
+
+Total AUM (Cr) =
+[Total AUM (INR)] / 10000000
+
+Latest NAV =
+VAR LatestDate = MAX ( 'NAV History'[nav_date] )
+RETURN
+    CALCULATE ( MAX ( 'NAV History'[nav] ), 'NAV History'[nav_date] = LatestDate )
+
+Wtd Avg NAV =
+VAR LatestDate = MAX ( 'NAV History'[nav_date] )
+VAR T =
+    ADDCOLUMNS (
+        VALUES ( Funds[fund_code] ),
+        "aum", CALCULATE ( SUM ( 'NAV History'[net_assets] ),
+                 'NAV History'[nav_date] = LatestDate ),
+        "nav", CALCULATE ( MAX ( 'NAV History'[nav] ),
+                 'NAV History'[nav_date] = LatestDate )
+    )
+RETURN
+    SUMX ( T, [nav] * [aum] ) / SUMX ( T, [aum] )
+
+Units Outstanding (Cr) =
+VAR LatestDate = MAX ( 'NAV History'[nav_date] )
+RETURN
+    CALCULATE ( SUM ( 'NAV History'[units_close] ),
+        'NAV History'[nav_date] = LatestDate ) / 10000000
+
+Holdings Value (INR) =
+SUM ( 'NAV History'[holdings_value] )
+
+Cash Balance (INR) =
+SUM ( 'NAV History'[cash_close] )
+
+Daily Return % =
+VAR Curr = MAX ( 'NAV History'[nav] )
+VAR Prev = CALCULATE ( MAX ( 'NAV History'[nav] ),
+             'NAV History'[nav_date] = MAX ( 'NAV History'[nav_date] ) - 1 )
+RETURN
+    DIVIDE ( Curr - Prev, Prev )
+
+MTD Return % =
+VAR LatestDate = MAX ( 'NAV History'[nav_date] )
+VAR FirstOfMonth =
+    CALCULATE ( MIN ( 'NAV History'[nav_date] ),
+        'NAV History'[nav_date] >= STARTOFMONTH ( 'NAV History'[nav_date] ) )
+VAR NavNow = CALCULATE ( MAX ( 'NAV History'[nav] ), 'NAV History'[nav_date] = LatestDate )
+VAR NavStart = CALCULATE ( MAX ( 'NAV History'[nav] ), 'NAV History'[nav_date] = FirstOfMonth )
+RETURN
+    DIVIDE ( NavNow - NavStart, NavStart )
+
+Window Return % =
+VAR NavFirst = CALCULATE ( MAX ( 'NAV History'[nav] ), ALL ( 'NAV History'[nav_date] ) )
+VAR NavLast  = MAX ( 'NAV History'[nav] )
+RETURN
+    DIVIDE ( NavLast - NavFirst, NavFirst )
+
+// ---------------------------- INVESTOR FLOWS ------------------------------
+Gross Subscriptions (30d) =
+CALCULATE (
+    SUM ( Transactions[cash_impact] ),
+    Transactions[txn_type] = "SUBSCRIPTION",
+    DATESINPERIOD ( 'Date'[Date], MAX ( 'Date'[Date] ), -30, DAY )
+)
+
+Gross Redemptions (30d) =
+CALCULATE (
+    ABS ( SUM ( Transactions[cash_impact] ) ),
+    Transactions[txn_type] = "REDEMPTION",
+    DATESINPERIOD ( 'Date'[Date], MAX ( 'Date'[Date] ), -30, DAY )
+)
+
+Net Investor Flow (30d) =
+[Gross Subscriptions (30d)] - [Gross Redemptions (30d)]
+
+// ------------------------------ RECON CONTROL -----------------------------
+Recon Items Checked =
+COUNTA ( 'Recon Breaks'[break_id] ) * 0
+    + 17   // holdings items (books vs custodian, latest stmt)
+    + 3    // cash items    (books vs bank)
+    + CALCULATE ( COUNTROWS ( 'NAV History' ) )  // NAV items (engine vs RTA)
+
+Recon Matched =
+[Recon Items Checked] - [Open Breaks]
+
+Recon Match Rate % =
+DIVIDE ( [Recon Matched], [Recon Items Checked] )
+
+Open Breaks =
+CALCULATE ( COUNTROWS ( 'Recon Breaks' ), 'Recon Breaks'[status] = "OPEN" )
+
+SLA Breaches =
+CALCULATE ( COUNTROWS ( 'Recon Breaks' ),
+    'Recon Breaks'[status] = "OPEN", 'Recon Breaks'[sla_status] = "SLA_BREACH" )
+
+High Severity Breaks =
+CALCULATE ( COUNTROWS ( 'Recon Breaks' ),
+    'Recon Breaks'[status] = "OPEN", 'Recon Breaks'[severity] = "High" )
+
+Max |NAV Var| vs RTA % =
+VAR T =
+    ADDCOLUMNS (
+        'NAV History',
+        "varpct", ABS ( DIVIDE ( 'NAV History'[nav] - RELATED ( RTANAV[published_nav] ),
+                                 RELATED ( RTANAV[published_nav] ) ) )
+    )
+RETURN
+    MAXX ( T, [varpct] )
+
+Breaks 0-1d =
+CALCULATE ( [Open Breaks], 'Recon Breaks'[age_business_days] <= 1 )
+
+Breaks 2-3d =
+CALCULATE ( [Open Breaks], 'Recon Breaks'[age_business_days] >= 2,
+    'Recon Breaks'[age_business_days] <= 3 )
+
+Breaks 4-7d =
+CALCULATE ( [Open Breaks], 'Recon Breaks'[age_business_days] >= 4,
+    'Recon Breaks'[age_business_days] <= 7 )
+
+Breaks >7d =
+CALCULATE ( [Open Breaks], 'Recon Breaks'[age_business_days] > 7 )
+
+Break Impact (INR) =
+SUM ( 'Recon Breaks'[impact_inr] )
+
+// ------------------------------ CONTROL STATUS ----------------------------
+Control Status =
+VAR Fails =
+    IF ( [Recon Match Rate %] < 0.99, 1, 0 )
+    + IF ( CALCULATE ( COUNTROWS ( 'Recon Breaks' ),
+            'Recon Breaks'[recon_source] = "BANK",
+            'Recon Breaks'[status] = "OPEN" ) > 0, 1, 0 )
+    + IF ( [Max |NAV Var| vs RTA %] > 0.0005, 1, 0 )
+    + IF ( [SLA Breaches] > 0, 1, 0 )
+RETURN
+    IF ( Fails = 0, "ALL CONTROLS PASS", "CONTROL ALERT - " & Fails & " check(s) failing" )

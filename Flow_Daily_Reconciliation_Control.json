@@ -1,0 +1,468 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "name": "Daily NAV Recon Control - Fund Accounting",
+    "description": "Scheduled daily control: runs the Python NAV & reconciliation engine, loads results to SQL, publishes the Power BI dataset, raises Teams/Outlook alerts and approvals for breaks and SLA breaches. Skills: Power Automate + reconciliation.",
+    "author": "Fund Accounting NAV & Reconciliation Control Engine",
+    "skills": ["Power Automate", "Reconciliation", "SQL", "Python"]
+  },
+  "parameters": {
+    "$connections": {
+      "defaultValue": {},
+      "type": "Object",
+      "description": "Managed connector references (sql, teams, office365outlook, powerbi) - resolved at import time."
+    },
+    "EngineFolder": {
+      "defaultValue": "C:\\FundControl\\fund_nav_recon_engine",
+      "type": "String",
+      "description": "Workspace folder of the Fund Accounting NAV & Reconciliation Control Engine."
+    },
+    "SqlServer": {
+      "defaultValue": "fundctl-sql.database.windows.net",
+      "type": "String"
+    },
+    "SqlDatabase": {
+      "defaultValue": "FundControl",
+      "type": "String"
+    },
+    "FundManagerEmail": {
+      "defaultValue": "fundmanager@amc.example",
+      "type": "String"
+    },
+    "FundOpsTeamId": {
+      "defaultValue": "",
+      "type": "String",
+      "description": "Teams team id for the 'Fund Ops Control' channel."
+    },
+    "FundOpsChannelId": {
+      "defaultValue": "",
+      "type": "String",
+      "description": "Channel id for the 'Fund Ops Control' channel."
+    },
+    "PowerBIDatasetId": {
+      "defaultValue": "",
+      "type": "String",
+      "description": "Power BI dataset id of 'Fund NAV & Recon Control'."
+    }
+  },
+  "triggers": {
+    "Recurrence_Daily_0630_IST": {
+      "type": "Recurrence",
+      "recurrence": {
+        "frequency": "Day",
+        "interval": 1,
+        "schedule": {
+          "hours": [1],
+          "minutes": [0]
+        },
+        "timeZone": "India Standard Time"
+      },
+      "metadata": {
+        "comment": "06:30 IST daily - runs after custodian (T-1), bank and RTA files have landed."
+      }
+    }
+  },
+  "actions": {
+    "Initialize_Run_Variables": {
+      "type": "InitializeVariable",
+      "inputs": {
+        "variables": [
+          {
+            "name": "report_date",
+            "type": "string",
+            "value": "@utcNow('yyyy-MM-dd')"
+          },
+          {
+            "name": "open_breaks",
+            "type": "integer",
+            "value": 0
+          },
+          {
+            "name": "sla_breaches",
+            "type": "integer",
+            "value": 0
+          },
+          {
+            "name": "match_rate_pct",
+            "type": "float",
+            "value": 0
+          },
+          {
+            "name": "controls_passed",
+            "type": "string",
+            "value": ""
+          }
+        ]
+      },
+      "runAfter": {}
+    },
+
+    "Run_Python_Engine": {
+      "type": "PowerAutomateDesktop",
+      "inputs": {
+        "desktopFlowAction": "RunApplication",
+        "applicationPath": "python.exe",
+        "arguments": "02_python\\run_all.py",
+        "workingDirectory": "@parameters('EngineFolder')",
+        "waitForCompletion": true,
+        "timeout": "PT15M"
+      },
+      "metadata": {
+        "comment": "Runs the full pipeline: sample data -> NAV engine -> external files -> reconciliation -> control panel. In a cloud-only deployment, replace this step with an HTTP call to an Azure Function / container that runs the same command."
+      },
+      "runAfter": {
+        "Initialize_Run_Variables": ["Succeeded"]
+      }
+    },
+
+    "Load_Breaks_From_SQL": {
+      "type": "OpenApiConnection",
+      "inputs": {
+        "host": {
+          "connectionName": "shared_sql",
+          "operationId": "SelectRows",
+          "apiId": "/providers/Microsoft.PowerApps/apis/shared_sql"
+        },
+        "parameters": {
+          "server": "@parameters('SqlServer')",
+          "database": "@parameters('SqlDatabase')",
+          "query": "SELECT break_id, detected_date, fund_code, recon_source, break_type, severity, ref_key, impact_inr, age_business_days, sla_status, owner, status FROM fundctl.ReconBreaks WHERE status = 'OPEN' ORDER BY sla_status DESC, impact_inr DESC"
+        }
+      },
+      "metadata": {
+        "comment": "Engine outputs were loaded into SQL by the previous step's run (BCP / OPENROWSET in the Python pipeline or an SSIS step)."
+      },
+      "runAfter": {
+        "Run_Python_Engine": ["Succeeded"]
+      }
+    },
+
+    "Parse_Recon_Summary": {
+      "type": "ParseJson",
+      "inputs": {
+        "content": "@body('HTTP_Read_Summary_File')",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "as_on": { "type": "string" },
+            "items": { "type": "integer" },
+            "matched": { "type": "integer" },
+            "breaks": { "type": "integer" },
+            "match_rate_pct": { "type": "number" },
+            "sla_breaches": { "type": "integer" },
+            "controls": {
+              "type": "object",
+              "properties": {
+                "passed": { "type": "integer" },
+                "total": { "type": "integer" }
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Load_Breaks_From_SQL": ["Succeeded"]
+      }
+    },
+
+    "Set_Control_Variables": {
+      "type": "Scope",
+      "actions": {
+        "Set_open_breaks": {
+          "type": "SetVariable",
+          "inputs": {
+            "name": "open_breaks",
+            "value": "@coalesce(body('Parse_Recon_Summary')?['breaks'], 0)"
+          },
+          "runAfter": {}
+        },
+        "Set_sla_breaches": {
+          "type": "SetVariable",
+          "inputs": {
+            "name": "sla_breaches",
+            "value": "@coalesce(body('Parse_Recon_Summary')?['sla_breaches'], 0)"
+          },
+          "runAfter": {
+            "Set_open_breaks": ["Succeeded"]
+          }
+        },
+        "Set_match_rate": {
+          "type": "SetVariable",
+          "inputs": {
+            "name": "match_rate_pct",
+            "value": "@coalesce(body('Parse_Recon_Summary')?['match_rate_pct'], 0)"
+          },
+          "runAfter": {
+            "Set_sla_breaches": ["Succeeded"]
+          }
+        },
+        "Set_controls": {
+          "type": "SetVariable",
+          "inputs": {
+            "name": "controls_passed",
+            "value": "@concat(string(body('Parse_Recon_Summary')?['controls']?['passed']), '/', string(body('Parse_Recon_Summary')?['controls']?['total']))"
+          },
+          "runAfter": {
+            "Set_match_rate": ["Succeeded"]
+          }
+        }
+      },
+      "runAfter": {
+        "Parse_Recon_Summary": ["Succeeded"]
+      }
+    },
+
+    "Condition_Breaks_Open": {
+      "type": "If",
+      "expression": "@greater(variables('open_breaks'), 0)",
+      "actions": {
+        "Post_Adaptive_Card_To_Teams": {
+          "type": "OpenApiConnection",
+          "inputs": {
+            "host": {
+              "connectionName": "shared_teams",
+              "operationId": "PostCardToChannel",
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_teams"
+            },
+            "parameters": {
+              "teamId": "@parameters('FundOpsTeamId')",
+              "channelId": "@parameters('FundOpsChannelId')",
+              "card": {
+                "type": "AdaptiveCard",
+                "version": "1.4",
+                "body": [
+                  {
+                    "type": "TextBlock",
+                    "size": "Large",
+                    "weight": "Bolder",
+                    "color": "Attention",
+                    "text": "🚨 RECONCILIATION CONTROL ALERT - @{variables('report_date')}"
+                  },
+                  {
+                    "type": "FactSet",
+                    "facts": [
+                      { "title": "Open breaks", "value": "@{variables('open_breaks')}" },
+                      { "title": "SLA breaches", "value": "@{variables('sla_breaches')}" },
+                      { "title": "Match rate", "value": "@{variables('match_rate_pct')}%" },
+                      { "title": "Controls passed", "value": "@{variables('controls_passed')}" }
+                    ]
+                  },
+                  {
+                    "type": "TextBlock",
+                    "text": "Top breaks (from Recon_Breaks):",
+                    "weight": "Bolder"
+                  },
+                  {
+                    "type": "TextBlock",
+                    "text": "@replace(string(body('Load_Breaks_From_SQL')?['value']), '[', '')",
+                    "wrap": true
+                  }
+                ],
+                "actions": [
+                  {
+                    "type": "Action.OpenUrl",
+                    "title": "Open Control Dashboard",
+                    "url": "https://app.powerbi.com/groups/.../reports/Fund_NAV_Recon_Control"
+                  }
+                ]
+              }
+            }
+          },
+          "runAfter": {}
+        },
+
+        "Apply_To_Each_Open_Break": {
+          "type": "Foreach",
+          "foreach": "@body('Load_Breaks_From_SQL')?['value']",
+          "actions": {
+            "Escalate_Break_To_Owner": {
+              "type": "OpenApiConnection",
+              "inputs": {
+                "host": {
+                  "connectionName": "shared_office365outlook",
+                  "operationId": "SendEmailV2",
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365outlook"
+                },
+                "parameters": {
+                  "emailMessage": {
+                    "To": "fundops@amc.example",
+                    "Subject": "[BREAK @{items('Apply_To_Each_Open_Break')?['break_id']}] @{items('Apply_To_Each_Open_Break')?['break_type']} - @{items('Apply_To_Each_Open_Break')?['fund_code']} - SLA: @{items('Apply_To_Each_Open_Break')?['sla_status']}",
+                    "Body": "Break @{items('Apply_To_Each_Open_Break')?['break_id']} detected on @{items('Apply_To_Each_Open_Break')?['detected_date']}. Source: @{items('Apply_To_Each_Open_Break')?['recon_source']}. Ref: @{items('Apply_To_Each_Open_Break')?['ref_key']}. Impact: ₹ @{items('Apply_To_Each_Open_Break')?['impact_inr']}. Age: @{items('Apply_To_Each_Open_Break')?['age_business_days']} business day(s). Owner: @{items('Apply_To_Each_Open_Break')?['owner']}. Please investigate and resolve within T+1.",
+                    "Importance": "High"
+                  }
+                }
+              },
+              "runAfter": {}
+            },
+            "Mark_Break_Escalated_In_SQL": {
+              "type": "OpenApiConnection",
+              "inputs": {
+                "host": {
+                  "connectionName": "shared_sql",
+                  "operationId": "ExecuteStoredProcedure",
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_sql"
+                },
+                "parameters": {
+                  "server": "@parameters('SqlServer')",
+                  "database": "@parameters('SqlDatabase')",
+                  "procedure": "fundctl.usp_MarkBreakEscalated",
+                  "parameters": {
+                    "break_id": "@items('Apply_To_Each_Open_Break')?['break_id']"
+                  }
+                }
+              },
+              "runAfter": {
+                "Escalate_Break_To_Owner": ["Succeeded"]
+              }
+            }
+          },
+          "runAfter": {
+            "Post_Adaptive_Card_To_Teams": ["Succeeded"]
+          }
+        },
+
+        "Start_Approval_For_SLA_Breach": {
+          "type": "OpenApiConnection",
+          "inputs": {
+            "host": {
+              "connectionName": "shared_approvals",
+              "operationId": "StartAndWaitForAnApproval",
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_approvals"
+            },
+            "parameters": {
+              "approvalType": "Approve/Reject - First to respond",
+              "title": "SLA BREACH escalation - Fund NAV Recon Control @{variables('report_date')}",
+              "assignedTo": "@parameters('FundManagerEmail')",
+              "details": "Open breaks: @{variables('open_breaks')}. SLA breaches: @{variables('sla_breaches')}. Match rate: @{variables('match_rate_pct')}%. Controls: @{variables('controls_passed')}. Approve the resolution plan or reject to escalate to the CFO.",
+              "itemLink": "https://app.powerbi.com/groups/.../reports/Fund_NAV_Recon_Control",
+              "itemLinkDescription": "Control Dashboard"
+            }
+          },
+          "runAfter": {
+            "Apply_To_Each_Open_Break": ["Succeeded"]
+          }
+        },
+
+        "Send_Control_Alert_Email": {
+          "type": "OpenApiConnection",
+          "inputs": {
+            "host": {
+              "connectionName": "shared_office365outlook",
+              "operationId": "SendEmailV2",
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365outlook"
+            },
+            "parameters": {
+              "emailMessage": {
+                "To": "@parameters('FundManagerEmail')",
+                "Cc": "fundops@amc.example",
+                "Subject": "[CONTROL ALERT] NAV & Recon control - @{variables('report_date')} - @{variables('open_breaks')} open breaks",
+                "Body": "Daily control run @{variables('report_date')} completed with alerts. Match rate @{variables('match_rate_pct')}%, open breaks @{variables('open_breaks')}, SLA breaches @{variables('sla_breaches')}, controls passed @{variables('controls_passed')}. Full report: outputs/run_report.txt and the Control Dashboard in Power BI.",
+                "Attachments": [
+                  {
+                    "Name": "run_report.txt",
+                    "ContentBytes": "@base64(body('HTTP_Read_Report_File'))"
+                  }
+                ]
+              }
+            }
+          },
+          "runAfter": {
+            "Start_Approval_For_SLA_Breach": ["Succeeded", "Skipped"]
+          }
+        }
+      },
+      "else": {
+        "actions": {
+          "Send_All_Clear_Email": {
+            "type": "OpenApiConnection",
+            "inputs": {
+              "host": {
+                "connectionName": "shared_office365outlook",
+                "operationId": "SendEmailV2",
+                "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365outlook"
+              },
+              "parameters": {
+                "emailMessage": {
+                  "To": "fundops@amc.example",
+                  "Subject": "[CONTROL OK] NAV & Recon control - @{variables('report_date')} - all controls PASS",
+                  "Body": "Daily control run @{variables('report_date')} completed clean. Match rate @{variables('match_rate_pct')}%, no open breaks, controls passed @{variables('controls_passed')}."
+                }
+              }
+            },
+            "runAfter": {}
+          }
+        }
+      },
+      "runAfter": {
+        "Set_Control_Variables": ["Succeeded"]
+      }
+    },
+
+    "Run_Control_Panel_SQL": {
+      "type": "OpenApiConnection",
+      "inputs": {
+        "host": {
+          "connectionName": "shared_sql",
+          "operationId": "ExecuteStoredProcedure",
+          "apiId": "/providers/Microsoft.PowerApps/apis/shared_sql"
+        },
+        "parameters": {
+          "server": "@parameters('SqlServer')",
+          "database": "@parameters('SqlDatabase')",
+          "procedure": "fundctl.usp_RunControlPanel",
+          "parameters": {
+            "run_date": "@variables('report_date')"
+          }
+        }
+      },
+      "metadata": {
+        "comment": "Evaluates CHK01-CHK05 into fundctl.ReconControlPanel (same checks as the Excel Control_Panel sheet)."
+      },
+      "runAfter": {
+        "Condition_Breaks_Open": ["Succeeded"]
+      }
+    },
+
+    "Refresh_PowerBI_Dataset": {
+      "type": "OpenApiConnection",
+      "inputs": {
+        "host": {
+          "connectionName": "shared_powerbi",
+          "operationId": "RefreshDataset",
+          "apiId": "/providers/Microsoft.PowerApps/apis/shared_powerbi"
+        },
+        "parameters": {
+          "datasetId": "@parameters('PowerBIDatasetId')",
+          "notifyOption": "MailOnFailure"
+        }
+      },
+      "metadata": {
+        "comment": "Publishes the fresh NAV & recon numbers to the 'Fund NAV & Recon Control' dataset behind the 1-page dashboard."
+      },
+      "runAfter": {
+        "Run_Control_Panel_SQL": ["Succeeded"]
+      }
+    },
+
+    "Write_Audit_Log": {
+      "type": "OpenApiConnection",
+      "inputs": {
+        "host": {
+          "connectionName": "shared_sql",
+          "operationId": "ExecuteQuery",
+          "apiId": "/providers/Microsoft.PowerApps/apis/shared_sql"
+        },
+        "parameters": {
+          "server": "@parameters('SqlServer')",
+          "database": "@parameters('SqlDatabase')",
+          "query": "INSERT INTO fundctl.AuditLog (event_type, entity, entity_key, performed_by, details) VALUES ('RECON_RUN', 'CONTROL_PANEL', '@{variables('report_date')}', 'PowerAutomate:Daily NAV Recon Control', 'open_breaks=@{variables('open_breaks')}; sla_breaches=@{variables('sla_breaches')}; match_rate=@{variables('match_rate_pct')}%; controls=@{variables('controls_passed')}')"
+        }
+      },
+      "runAfter": {
+        "Refresh_PowerBI_Dataset": ["Succeeded"]
+      }
+    }
+  },
+  "outputs": {}
+}

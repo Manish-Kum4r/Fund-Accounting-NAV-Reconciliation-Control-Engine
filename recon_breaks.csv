@@ -1,0 +1,6 @@
+break_id,detected_date,fund_code,recon_source,break_type,severity,ref_key,book_value,external_value,diff_value,impact_inr,age_business_days,sla_days,sla_status,owner,status,note
+BRK-001,2026-09-30,GAMMA_BAL,RTA,NAV_BREAK,High,GAMMA_BAL|2026-09-30,9.226041,9.233422,0.00080002,110084.64,4,1,SLA_BREACH,RTA Ops Team,OPEN,"Published NAV 8 bps off - carried forward, SLA breach"
+BRK-002,2026-10-05,ALPHA_EQ,CUSTODIAN,QTY_BREAK,High,ALPHA_EQ|HDFCBANK,600,650,-50,85350.89,1,1,OK,Custodian Ops Team,OPEN,Custodian shows 50 units more - missing sell in books
+BRK-003,2026-10-05,BETA_DEBT,CUSTODIAN,MISSING_IN_CUSTODIAN,High,BETA_DEBT|NCD-REL,22600,,,22136449.14,1,1,OK,Custodian Ops Team,OPEN,Holding not reported by custodian
+BRK-004,2026-10-05,GAMMA_BAL,CUSTODIAN,PRICE_BREAK,Medium,GAMMA_BAL|MARUTI,19700,19700,0,170696.56,1,1,OK,Custodian Ops Team,OPEN,Custodian price 0.5% off EOD close
+BRK-005,2026-10-06,ALPHA_EQ,BANK,AMOUNT_BREAK,Medium,ALPHA_EQ|CASH,-4015829.86,-4028329.86,12500.0,12500.0,0,1,OK,Banking Ops Team,OPEN,Mgmt fee debit missing in bank statement

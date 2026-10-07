@@ -1,0 +1,86 @@
+# ============================================================================
+# Fund Accounting NAV & Reconciliation Control Engine - Configuration
+# ============================================================================
+project:
+  name: "Fund Accounting NAV & Reconciliation Control Engine"
+  version: "1.0.0"
+  as_on: "2026-10-06"          # last business day (T)
+  business_days: 30            # look-back window
+  currency: "INR"
+  country: "IN"
+  timezone: "Asia/Calcutta"
+
+funds:
+  - fund_code: "ALPHA_EQ"
+    fund_name: "Alpha Equity Fund"
+    category: "Equity"
+    mgmt_fee_bps: 150          # 1.50% p.a.
+    opening_nav: 10.0000
+    opening_units: 10000000    # 1.00 Crore units
+  - fund_code: "BETA_DEBT"
+    fund_name: "Beta Debt Fund"
+    category: "Debt"
+    mgmt_fee_bps: 75           # 0.75% p.a.
+    opening_nav: 10.0000
+    opening_units: 20000000    # 2.00 Crore units
+  - fund_code: "GAMMA_BAL"
+    fund_name: "Gamma Balanced Fund"
+    category: "Hybrid"
+    mgmt_fee_bps: 125          # 1.25% p.a.
+    opening_nav: 10.0000
+    opening_units: 15000000    # 1.50 Crore units
+
+securities:
+  - {symbol: "HDFCBANK",   name: "HDFC Bank Ltd",         sector: "Financials", type: "Equity", base_price: 1650.0, vol: 0.012}
+  - {symbol: "ICICIBANK",  name: "ICICI Bank Ltd",        sector: "Financials", type: "Equity", base_price: 1250.0, vol: 0.013}
+  - {symbol: "INFY",       name: "Infosys Ltd",           sector: "IT",         type: "Equity", base_price: 1550.0, vol: 0.014}
+  - {symbol: "TCS",        name: "Tata Consultancy Svcs", sector: "IT",         type: "Equity", base_price: 3600.0, vol: 0.011}
+  - {symbol: "RELIANCE",   name: "Reliance Industries",   sector: "Energy",     type: "Equity", base_price: 1350.0, vol: 0.015}
+  - {symbol: "ITC",        name: "ITC Ltd",               sector: "FMCG",       type: "Equity", base_price: 480.0,  vol: 0.010}
+  - {symbol: "SBIN",       name: "State Bank of India",   sector: "Financials", type: "Equity", base_price: 620.0,  vol: 0.016}
+  - {symbol: "LT",         name: "Larsen & Toubro",       sector: "Infra",      type: "Equity", base_price: 2400.0, vol: 0.013}
+  - {symbol: "MARUTI",     name: "Maruti Suzuki India",   sector: "Auto",       type: "Equity", base_price: 1800.0, vol: 0.014}
+  - {symbol: "HINDUNILVR", name: "Hindustan Unilever",    sector: "FMCG",       type: "Equity", base_price: 2600.0, vol: 0.009}
+  - {symbol: "GOI7.26-36", name: "GOI 7.26% 2036",        sector: "G-Sec",      type: "Debt",   base_price: 102.0,  vol: 0.003}
+  - {symbol: "GOI8.2-33",  name: "GOI 8.20% 2033",        sector: "G-Sec",      type: "Debt",   base_price: 108.5,  vol: 0.003}
+  - {symbol: "SDL-MH-32",  name: "SDL Maharashtra 2032",  sector: "SDL",        type: "Debt",   base_price: 101.5,  vol: 0.004}
+  - {symbol: "CP-TATA",    name: "Tata Motors CP 90D",    sector: "Money Mkt",  type: "Debt",   base_price: 99.8,   vol: 0.001}
+  - {symbol: "NCD-REL",    name: "Reliance NCD 9.10%",    sector: "Corporate",  type: "Debt",   base_price: 1005.0, vol: 0.004}
+
+# fund -> securities it may hold (weights sum to 0.95; residual 5% is opening cash)
+fund_holdings:
+  ALPHA_EQ:  {HDFCBANK: 0.25, ICICIBANK: 0.20, INFY: 0.15, TCS: 0.15, RELIANCE: 0.10, ITC: 0.10}
+  BETA_DEBT: {GOI7.26-36: 0.30, GOI8.2-33: 0.25, SDL-MH-32: 0.15, CP-TATA: 0.10, NCD-REL: 0.15}
+  GAMMA_BAL: {HDFCBANK: 0.20, INFY: 0.15, LT: 0.10, MARUTI: 0.10, GOI7.26-36: 0.25, SDL-MH-32: 0.15}
+
+investors:
+  - {name: "Aarav Sharma",   pan: "AAAPS1234A"}
+  - {name: "Priya Nair",     pan: "ABCPN5678B"}
+  - {name: "Rahul Mehta",    pan: "ACARM6789C"}
+  - {name: "Sneha Iyer",     pan: "ADSIS2345D"}
+  - {name: "Vikram Reddy",   pan: "AVBRS7890E"}
+  - {name: "Ananya Gupta",   pan: "AANJG3456F"}
+  - {name: "Karan Singh",    pan: "AKLSG4567G"}
+  - {name: "Deepa Kulkarni", pan: "DKDKL5678H"}
+  - {name: "Arjun Patel",    pan: "APAPL6789I"}
+  - {name: "Meera Joshi",    pan: "MMJMJ7890K"}
+
+recon:
+  qty_tolerance_units: 0
+  price_tolerance_pct: 0.01      # 0.01% on price
+  amount_tolerance_inr: 0.50
+  nav_tolerance_pct: 0.05        # 5 bps
+  sla_days: 1                    # breaks must be resolved within T+1 business day
+  custodian_stmt_date: "2026-10-05"   # T-1 custodian file (realistic ageing)
+  bank_stmt_date: "2026-10-06"
+  rta_stmt_date: "2026-10-06"
+
+# Deliberate sample breaks (so the control engine demonstrably catches issues)
+sample_breaks:
+  - {source: "CUSTODIAN", fund: "ALPHA_EQ",  symbol: "HDFCBANK", type: "QTY_BREAK",            qty_delta: 50, price_delta_pct: 0.0, note: "Custodian shows 50 units more - missing sell in books"}
+  - {source: "CUSTODIAN", fund: "BETA_DEBT", symbol: "NCD-REL",   type: "MISSING_IN_CUSTODIAN", qty_delta: 0,  price_delta_pct: 0.0, note: "Holding not reported by custodian"}
+  - {source: "CUSTODIAN", fund: "GAMMA_BAL", symbol: "MARUTI",    type: "PRICE_BREAK",          qty_delta: 0,  price_delta_pct: 0.5, note: "Custodian price 0.5% off EOD close"}
+  - {source: "BANK",      fund: "ALPHA_EQ",  type: "AMOUNT_BREAK", amount_delta: -12500.0, note: "Mgmt fee debit missing in bank statement"}
+  - {source: "RTA",       fund: "GAMMA_BAL", date: "2026-09-30", type: "NAV_BREAK", nav_delta_pct: 0.08, note: "Published NAV 8 bps off - carried forward, SLA breach"}
+
+random_seed: 11
